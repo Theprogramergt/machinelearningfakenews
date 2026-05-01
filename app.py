@@ -1,4 +1,4 @@
-import os, re, time, requests
+import os, re, time, requests, gc
 import xml.etree.ElementTree as ET
 import pandas as pd
 from flask import Flask, jsonify, render_template, request
@@ -10,6 +10,8 @@ app = Flask(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 RSS_CACHE_TTL = 600
+SAMPLE_PER_CLASS = 3000   # ← only 3k fake + 3k real = 6k total (fits in free RAM)
+MAX_TFIDF_FEATURES = 2000  # ← smaller matrix = less RAM
 
 # ── Lebanese / Arabic TV News Sources ─────────────────────────────────────────
 TV_SOURCES = [
@@ -93,7 +95,9 @@ def match_sources(user_text):
     return matches
 
 # ── Global ML state ───────────────────────────────────────────────────────────
-model = None; tfidf = None; records = []
+model = None
+tfidf = None
+records = []
 
 def clean_text(text):
     if not isinstance(text, str): return ""
@@ -105,10 +109,10 @@ def clean_text(text):
 def train():
     global model, tfidf, records
 
-    # Load directly from Kaggle without saving to disk
     try:
         import kagglehub
         from kagglehub import KaggleDatasetAdapter
+
         print("Downloading Fake.csv from Kaggle...")
         fake_df = kagglehub.load_dataset(
             KaggleDatasetAdapter.PANDAS,
@@ -116,6 +120,7 @@ def train():
             "News _dataset/Fake.csv"
         )
         fake_df["label"] = 1
+
         print("Downloading True.csv from Kaggle...")
         true_df = kagglehub.load_dataset(
             KaggleDatasetAdapter.PANDAS,
@@ -123,38 +128,73 @@ def train():
             "News _dataset/True.csv"
         )
         true_df["label"] = 0
+
     except Exception as e:
         return False, f"Failed to download dataset: {str(e)}"
 
+    # ── Sample to save RAM ────────────────────────────────────────────────────
+    fake_df = fake_df.sample(n=min(SAMPLE_PER_CLASS, len(fake_df)), random_state=42)
+    true_df = true_df.sample(n=min(SAMPLE_PER_CLASS, len(true_df)), random_state=42)
+
     df = pd.concat([fake_df, true_df], ignore_index=True).sample(frac=1, random_state=42)
-    df["text"] = (df.get("title", "") + " " + df.get("text", "")).apply(clean_text)
+
+    # free the raw frames immediately
+    del fake_df, true_df
+    gc.collect()
+
+    df["text"] = (
+        df.get("title", pd.Series(dtype=str)).fillna("") + " " +
+        df.get("text",  pd.Series(dtype=str)).fillna("")
+    ).apply(clean_text)
     df = df[df["text"].str.strip() != ""].reset_index(drop=True)
-    X_raw = df["text"]; Y = df["label"]
-    tfidf = TfidfVectorizer(stop_words="english", max_features=5000)
+
+    X_raw = df["text"]
+    Y     = df["label"]
+
+    tfidf = TfidfVectorizer(stop_words="english", max_features=MAX_TFIDF_FEATURES)
     X = tfidf.fit_transform(X_raw)
-    X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
-    model = LogisticRegression(C=1.0, solver="liblinear")
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, Y, test_size=0.2, random_state=42
+    )
+
+    model = LogisticRegression(C=1.0, solver="liblinear", max_iter=200)
     model.fit(X_train, y_train)
-    train_idx = y_train.index.tolist()
-    probs = model.predict_proba(X_train)
-    preds = model.predict(X_train)
+
+    # free big matrices right after training
+    del X, X_train
+    gc.collect()
+
+    # ── Build records from TEST split only (smaller, unbiased) ───────────────
+    probs = model.predict_proba(X_test)
+    preds = model.predict(X_test)
+    test_idx = y_test.index.tolist()
+
     records = []
-    for i, idx in enumerate(train_idx):
+    for i, idx in enumerate(test_idx):
         row = df.iloc[idx]
         records.append({
-            "id": i+1, "title": str(row.get("title",""))[:120] or "—",
-            "text": str(row.get("text",""))[:600],
-            "actual": int(row["label"]), "predicted": int(preds[i]),
-            "fake_prob": round(float(probs[i][1])*100,1),
-            "real_prob": round(float(probs[i][0])*100,1),
-            "correct": bool(preds[i] == row["label"]),
+            "id":        i + 1,
+            "title":     str(row.get("title", ""))[:120] or "—",
+            "text":      str(row.get("text",  ""))[:400],
+            "actual":    int(row["label"]),
+            "predicted": int(preds[i]),
+            "fake_prob": round(float(probs[i][1]) * 100, 1),
+            "real_prob": round(float(probs[i][0]) * 100, 1),
+            "correct":   bool(preds[i] == row["label"]),
         })
+
+    del X_test, probs, preds
+    gc.collect()
+
     acc = round(sum(r["correct"] for r in records) / len(records) * 100, 2)
     return True, {"total": len(records), "accuracy": acc}
 
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/")
-def index(): return render_template("index.html")
+def index():
+    return render_template("index.html")
 
 @app.route("/train", methods=["POST"])
 def train_route():
@@ -163,21 +203,27 @@ def train_route():
 
 @app.route("/articles")
 def articles():
-    page = int(request.args.get("page", 1))
+    page     = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 25))
-    filter_ = request.args.get("filter", "all")
+    filter_  = request.args.get("filter", "all")
     filtered = records
     if filter_ == "fake":  filtered = [r for r in records if r["predicted"] == 1]
     elif filter_ == "real": filtered = [r for r in records if r["predicted"] == 0]
     elif filter_ == "wrong": filtered = [r for r in records if not r["correct"]]
-    total = len(filtered); start = (page-1)*per_page
-    return jsonify({"items": filtered[start:start+per_page], "total": total,
-                    "page": page, "pages": (total+per_page-1)//per_page})
+    total = len(filtered)
+    start = (page - 1) * per_page
+    return jsonify({
+        "items": filtered[start:start + per_page],
+        "total": total,
+        "page":  page,
+        "pages": (total + per_page - 1) // per_page,
+    })
 
 @app.route("/article/<int:article_id>")
 def article_detail(article_id):
     for r in records:
-        if r["id"] == article_id: return jsonify(r)
+        if r["id"] == article_id:
+            return jsonify(r)
     return jsonify({"error": "Not found"}), 404
 
 @app.route("/predict_ml", methods=["POST"])
@@ -212,13 +258,15 @@ def predict_tv():
 
 @app.route("/sources")
 def sources():
-    return jsonify([{"name": s["name"], "name_ar": s["name_ar"],
-                     "color": s["color"]} for s in TV_SOURCES])
+    return jsonify([{
+        "name": s["name"], "name_ar": s["name_ar"], "color": s["color"]
+    } for s in TV_SOURCES])
 
 if __name__ == "__main__":
-    print("\n" + "="*55)
+    print("\n" + "=" * 55)
     print("  Fake News Browser  +  TV Source Check")
     print(f"  Sources : {len(TV_SOURCES)} Lebanese TV channels")
+    print("  Sample  : {SAMPLE_PER_CLASS} articles per class")
     print("  Open    : http://localhost:5000")
-    print("="*55 + "\n")
+    print("=" * 55 + "\n")
     app.run(debug=True, port=5000)
