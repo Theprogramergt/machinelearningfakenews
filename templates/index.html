@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Fake News Browser</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=Noto+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg:#0d0f14; --panel:#13161e; --border:#1f2330;
+  --accent:#e8ff57; --fake:#ff4d6d; --real:#4dffb4;
+  --muted:#5a607a; --text:#e2e6f0; --subtext:#8891aa;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;display:flex;flex-direction:column;}
+
+/* ── Header ── */
+header{display:flex;align-items:center;justify-content:space-between;
+  padding:16px 28px;border-bottom:1px solid var(--border);
+  position:sticky;top:0;background:var(--bg);z-index:100;flex-shrink:0;}
+.logo{font-size:1.1rem;font-weight:800;letter-spacing:.05em;}
+.logo span{color:var(--accent);}
+.stats-bar{display:flex;gap:20px;font-family:'DM Mono',monospace;font-size:.76rem;color:var(--subtext);}
+.stats-bar b{color:var(--text);}
+#trainBtn{background:var(--accent);color:#0d0f14;border:none;
+  font-family:'Syne',sans-serif;font-weight:700;font-size:.82rem;
+  padding:10px 20px;cursor:pointer;letter-spacing:.04em;transition:opacity .2s;}
+#trainBtn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* ── Middle area: sidebar + detail ── */
+.middle{display:grid;grid-template-columns:320px 1fr;flex:1;overflow:hidden;}
+
+/* Sidebar */
+.sidebar{border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+.filters{display:flex;gap:5px;padding:12px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+.filter-btn{background:transparent;border:1px solid var(--border);color:var(--subtext);
+  font-family:'Syne',sans-serif;font-size:.72rem;font-weight:600;
+  padding:5px 12px;cursor:pointer;transition:all .15s;}
+.filter-btn.active{border-color:var(--accent);color:var(--accent);background:rgba(232,255,87,.07);}
+.article-list{overflow-y:auto;flex:1;}
+.article-item{padding:12px 14px;border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background .12s;display:flex;gap:10px;align-items:flex-start;}
+.article-item:hover{background:rgba(255,255,255,.03);}
+.article-item.active{background:rgba(232,255,87,.05);border-left:3px solid var(--accent);}
+.badge{flex-shrink:0;font-family:'DM Mono',monospace;font-size:.65rem;
+  padding:3px 7px;border-radius:2px;margin-top:1px;}
+.badge.fake{background:rgba(255,77,109,.15);color:var(--fake);}
+.badge.real{background:rgba(77,255,180,.12);color:var(--real);}
+.item-content{flex:1;min-width:0;}
+.item-title{font-size:.8rem;font-weight:600;line-height:1.4;margin-bottom:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.item-meta{font-family:'DM Mono',monospace;font-size:.68rem;color:var(--muted);display:flex;gap:8px;}
+.wrong-dot{width:6px;height:6px;border-radius:50%;background:var(--fake);margin-top:5px;flex-shrink:0;}
+.pagination{display:flex;align-items:center;justify-content:space-between;
+  padding:9px 14px;border-top:1px solid var(--border);
+  font-family:'DM Mono',monospace;font-size:.72rem;color:var(--subtext);}
+.page-btn{background:transparent;border:1px solid var(--border);color:var(--text);
+  font-family:'DM Mono',monospace;font-size:.72rem;padding:5px 11px;cursor:pointer;transition:all .15s;}
+.page-btn:disabled{opacity:.3;cursor:not-allowed;}
+.page-btn:not(:disabled):hover{border-color:var(--accent);color:var(--accent);}
+
+/* Detail */
+.detail{overflow-y:auto;padding:28px 32px;display:flex;align-items:flex-start;justify-content:center;}
+.empty-state{text-align:center;color:var(--muted);margin-top:80px;}
+.empty-state .icon{font-size:2.5rem;margin-bottom:10px;opacity:.3;}
+.detail-card{width:100%;max-width:640px;}
+.detail-id{font-family:'DM Mono',monospace;font-size:.72rem;color:var(--muted);margin-bottom:6px;}
+.detail-title{font-size:1.1rem;font-weight:700;line-height:1.5;margin-bottom:14px;}
+.verdict-card{border:1px solid var(--border);padding:16px 20px;margin-bottom:18px;
+  display:grid;grid-template-columns:1fr 1fr;gap:16px;position:relative;}
+.verdict-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;}
+.verdict-card.fake-card::before{background:var(--fake);}
+.verdict-card.real-card::before{background:var(--real);}
+.verdict-label{font-size:.67rem;font-weight:700;letter-spacing:.1em;color:var(--muted);margin-bottom:5px;}
+.verdict-value{font-size:1.2rem;font-weight:800;}
+.verdict-value.fake{color:var(--fake);}
+.verdict-value.real{color:var(--real);}
+.prob-section{margin-bottom:18px;}
+.prob-label{font-size:.67rem;font-weight:700;letter-spacing:.1em;color:var(--muted);margin-bottom:10px;}
+.prob-row{display:flex;align-items:center;gap:10px;margin-bottom:7px;}
+.prob-name{font-family:'DM Mono',monospace;font-size:.75rem;width:38px;flex-shrink:0;}
+.prob-bar-bg{flex:1;height:5px;background:var(--border);border-radius:1px;overflow:hidden;}
+.prob-bar{height:100%;border-radius:1px;transition:width .6s ease;}
+.prob-bar.fake{background:var(--fake);}
+.prob-bar.real{background:var(--real);}
+.prob-pct{font-family:'DM Mono',monospace;font-size:.75rem;width:40px;text-align:right;color:var(--subtext);}
+.correctness{display:inline-flex;align-items:center;gap:7px;font-size:.78rem;font-weight:700;
+  padding:7px 14px;border:1px solid;margin-bottom:18px;}
+.correctness.correct{border-color:var(--real);color:var(--real);background:rgba(77,255,180,.06);}
+.correctness.wrong{border-color:var(--fake);color:var(--fake);background:rgba(255,77,109,.06);}
+.article-text{font-size:.83rem;line-height:1.75;color:var(--subtext);
+  border-left:2px solid var(--border);padding-left:14px;}
+
+/* ── Bottom: two checker panels side by side ── */
+.checker-row{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid var(--border);flex-shrink:0;}
+
+.checker-panel{display:flex;flex-direction:column;border-right:1px solid var(--border);}
+.checker-panel:last-child{border-right:none;}
+
+.checker-header{display:flex;align-items:center;gap:10px;padding:11px 18px;
+  border-bottom:1px solid var(--border);background:var(--panel);}
+.checker-icon{font-size:1rem;}
+.checker-title{font-size:.75rem;font-weight:700;letter-spacing:.06em;}
+.checker-title.ml{color:#a78bfa;}
+.checker-title.tv{color:#38bdf8;}
+.checker-subtitle{font-size:.65rem;color:var(--muted);margin-left:auto;font-family:'DM Mono',monospace;}
+
+.checker-body{display:flex;flex:1;}
+.checker-input{flex:1;display:flex;flex-direction:column;}
+.checker-input textarea{flex:1;background:transparent;border:none;outline:none;
+  color:var(--text);font-family:'DM Mono',monospace;font-size:.8rem;
+  padding:12px 16px;resize:none;min-height:90px;}
+.checker-input textarea::placeholder{color:var(--muted);}
+.checker-input textarea:focus{background:rgba(255,255,255,.015);}
+.checker-footer{display:flex;align-items:center;border-top:1px solid var(--border);}
+.analyze-btn{border:none;font-family:'Syne',sans-serif;font-weight:700;font-size:.78rem;
+  padding:9px 20px;cursor:pointer;letter-spacing:.04em;transition:opacity .2s;}
+.analyze-btn:disabled{opacity:.4;cursor:not-allowed;}
+.analyze-btn.ml{background:#a78bfa;color:#0d0f14;}
+.analyze-btn.tv{background:#38bdf8;color:#0d0f14;}
+.hint{flex:1;padding:0 12px;font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted);}
+
+/* Result boxes */
+.checker-result{width:200px;flex-shrink:0;border-left:1px solid var(--border);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:6px;padding:14px 12px;text-align:center;}
+.res-label{font-size:.62rem;font-weight:700;letter-spacing:.1em;color:var(--muted);}
+.res-verdict{font-size:1.25rem;font-weight:800;}
+.res-verdict.fake{color:var(--fake);}
+.res-verdict.real{color:var(--real);}
+.res-verdict.confirmed{color:var(--real);}
+.res-verdict.notfound{color:var(--fake);}
+.res-probs{font-family:'DM Mono',monospace;font-size:.68rem;color:var(--subtext);display:flex;gap:8px;}
+.res-idle{color:var(--muted);font-size:.72rem;font-family:'DM Mono',monospace;}
+
+/* TV matches list inside result */
+.tv-matches{width:100%;text-align:left;margin-top:4px;}
+.tv-match-item{display:flex;align-items:center;gap:6px;padding:3px 0;
+  border-bottom:1px solid var(--border);font-size:.65rem;}
+.tv-match-item:last-child{border-bottom:none;}
+.tv-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.tv-match-name{font-weight:700;flex-shrink:0;}
+.tv-match-pct{margin-left:auto;font-family:'DM Mono',monospace;color:var(--muted);}
+
+/* spinner / toast / loader */
+#toast{position:fixed;bottom:24px;right:24px;background:var(--panel);
+  border:1px solid var(--border);padding:11px 18px;font-size:.8rem;
+  font-family:'DM Mono',monospace;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999;}
+#toast.show{opacity:1;}
+#toast.error{border-color:var(--fake);color:var(--fake);}
+#toast.success{border-color:var(--real);color:var(--real);}
+#loader{position:fixed;inset:0;background:rgba(13,15,20,.85);display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:14px;z-index:200;}
+#loader.show{display:flex;}
+.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loader-text{font-family:'DM Mono',monospace;font-size:.78rem;color:var(--muted);}
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+a{color:inherit;text-decoration:underline;}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">FAKE<span>LENS</span></div>
+  <div class="stats-bar" id="statsBar"><span>Not trained yet</span></div>
+  <button id="trainBtn" onclick="trainModel()">▶ Train Model</button>
+</header>
+
+<!-- Middle: article list + detail -->
+<div class="middle">
+  <aside class="sidebar">
+    <div class="filters">
+      <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
+      <button class="filter-btn" onclick="setFilter('fake',this)">🔴 Fake</button>
+      <button class="filter-btn" onclick="setFilter('real',this)">🟢 Real</button>
+      <button class="filter-btn" onclick="setFilter('wrong',this)">❌ Wrong</button>
+    </div>
+    <div class="article-list" id="articleList">
+      <div style="padding:24px 14px;color:var(--muted);font-size:.8rem;text-align:center;">
+        Train the model first.
+      </div>
+    </div>
+    <div class="pagination" id="pagination" style="display:none">
+      <button class="page-btn" id="prevBtn" onclick="changePage(-1)">← Prev</button>
+      <span id="pageInfo">1 / 1</span>
+      <button class="page-btn" id="nextBtn" onclick="changePage(1)">Next →</button>
+    </div>
+  </aside>
+
+  <main class="detail" id="detailPanel">
+    <div class="empty-state">
+      <div class="icon">🔍</div>
+      <p>Select an article to inspect</p>
+    </div>
+  </main>
+</div>
+
+<!-- Bottom: two separate checker panels -->
+<div class="checker-row">
+
+  <!-- ① ML Model checker (trained data only) -->
+  <div class="checker-panel">
+    <div class="checker-header">
+      <span class="checker-icon">🤖</span>
+      <span class="checker-title ml">ML MODEL CHECK</span>
+      <span class="checker-subtitle">Uses your trained CSV data</span>
+    </div>
+    <div class="checker-body">
+      <div class="checker-input">
+        <textarea id="mlInput" placeholder="Paste or write any news here to check it against the trained model (Fake.csv / True.csv)…"></textarea>
+        <div class="checker-footer">
+          <button class="analyze-btn ml" id="mlBtn" onclick="checkML()">Check with Model →</button>
+          <span class="hint">Ctrl+1 to analyze</span>
+        </div>
+      </div>
+      <div class="checker-result" id="mlResult">
+        <div class="res-label">ML VERDICT</div>
+        <div class="res-idle">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② TV Sources checker (live RSS) -->
+  <div class="checker-panel">
+    <div class="checker-header">
+      <span class="checker-icon">📡</span>
+      <span class="checker-title tv">TV SOURCE CHECK</span>
+      <span class="checker-subtitle">MTV · Al Jadeed · LBCI · NNA · OTV · Annahar · Al Manar</span>
+    </div>
+    <div class="checker-body">
+      <div class="checker-input">
+        <textarea id="tvInput" placeholder="اكتب الخبر هنا للتحقق إذا نشره أي قناة تلفزيونية لبنانية… / Write the news to check if any Lebanese TV channel reported it…" dir="auto"></textarea>
+        <div class="checker-footer">
+          <button class="analyze-btn tv" id="tvBtn" onclick="checkTV()">Check TV Sources →</button>
+          <span class="hint">Ctrl+2 to analyze</span>
+        </div>
+      </div>
+      <div class="checker-result" id="tvResult">
+        <div class="res-label">TV VERDICT</div>
+        <div class="res-idle">—</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+<div id="loader"><div class="spinner"></div><div class="loader-text" id="loaderText">Training…</div></div>
+
+<script>
+let currentFilter='all', currentPage=1;
+const PER_PAGE=25;
+
+// ── Train ──────────────────────────────────────────────────────────────────
+async function trainModel(){
+  showLoader('Training model on CSV data…');
+  document.getElementById('trainBtn').disabled=true;
+  try{
+    const res=await fetch('/train',{method:'POST'});
+    const data=await res.json();
+    if(data.error){showToast(data.error,'error');return;}
+    document.getElementById('statsBar').innerHTML=
+      `<span>Articles <b>${data.total.toLocaleString()}</b></span><span>Accuracy <b>${data.accuracy}%</b></span>`;
+    showToast(`✓ Trained on ${data.total.toLocaleString()} articles — ${data.accuracy}% accuracy`,'success');
+    loadArticles();
+  }catch(e){showToast('Error: '+e.message,'error');}
+  finally{hideLoader();document.getElementById('trainBtn').disabled=false;}
+}
+
+// ── Article list ───────────────────────────────────────────────────────────
+function setFilter(f,btn){
+  currentFilter=f;currentPage=1;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');loadArticles();
+}
+function changePage(d){currentPage+=d;loadArticles();}
+
+async function loadArticles(){
+  const res=await fetch(`/articles?page=${currentPage}&per_page=${PER_PAGE}&filter=${currentFilter}`);
+  const data=await res.json();
+  const list=document.getElementById('articleList');
+  if(!data.items.length){
+    list.innerHTML='<div style="padding:20px 14px;color:var(--muted);font-size:.78rem;text-align:center;">No articles.</div>';
+    document.getElementById('pagination').style.display='none';return;
+  }
+  list.innerHTML=data.items.map(item=>`
+    <div class="article-item" id="item-${item.id}" onclick="showDetail(${item.id})">
+      ${!item.correct?'<div class="wrong-dot"></div>':'<div style="width:6px"></div>'}
+      <span class="badge ${item.predicted===1?'fake':'real'}">${item.predicted===1?'FAKE':'REAL'}</span>
+      <div class="item-content">
+        <div class="item-title">${esc(item.title)}</div>
+        <div class="item-meta">
+          <span>F ${item.fake_prob}%</span><span>R ${item.real_prob}%</span>
+          ${!item.correct?'<span style="color:var(--fake)">wrong</span>':''}
+        </div>
+      </div>
+    </div>`).join('');
+  const pag=document.getElementById('pagination');pag.style.display='flex';
+  document.getElementById('pageInfo').textContent=`${data.page} / ${data.pages}`;
+  document.getElementById('prevBtn').disabled=data.page<=1;
+  document.getElementById('nextBtn').disabled=data.page>=data.pages;
+}
+
+async function showDetail(id){
+  document.querySelectorAll('.article-item').forEach(el=>el.classList.remove('active'));
+  const el=document.getElementById('item-'+id);if(el)el.classList.add('active');
+  const res=await fetch(`/article/${id}`);
+  const item=await res.json();
+  const isFake=item.predicted===1;
+  document.getElementById('detailPanel').innerHTML=`
+    <div class="detail-card">
+      <div class="detail-id">#${item.id}</div>
+      <div class="detail-title">${esc(item.title)}</div>
+      <div class="correctness ${item.correct?'correct':'wrong'}">
+        ${item.correct?'✓ Correct prediction':'✗ Wrong — actual: '+(item.actual===1?'FAKE':'REAL')}
+      </div>
+      <div class="verdict-card ${isFake?'fake-card':'real-card'}">
+        <div><div class="verdict-label">PREDICTION</div>
+          <div class="verdict-value ${isFake?'fake':'real'}">${isFake?'🔴 FAKE':'🟢 REAL'}</div></div>
+        <div><div class="verdict-label">ACTUAL</div>
+          <div class="verdict-value ${item.actual===1?'fake':'real'}">${item.actual===1?'🔴 FAKE':'🟢 REAL'}</div></div>
+      </div>
+      <div class="prob-section">
+        <div class="prob-label">CONFIDENCE</div>
+        <div class="prob-row"><span class="prob-name" style="color:var(--fake)">FAKE</span>
+          <div class="prob-bar-bg"><div class="prob-bar fake" style="width:${item.fake_prob}%"></div></div>
+          <span class="prob-pct">${item.fake_prob}%</span></div>
+        <div class="prob-row"><span class="prob-name" style="color:var(--real)">REAL</span>
+          <div class="prob-bar-bg"><div class="prob-bar real" style="width:${item.real_prob}%"></div></div>
+          <span class="prob-pct">${item.real_prob}%</span></div>
+      </div>
+      <div class="prob-label">ARTICLE TEXT</div>
+      <div class="article-text">${esc(item.text)}${item.text.length>=600?'…':''}</div>
+    </div>`;
+}
+
+// ── ① ML Model check (trained CSV data only) ───────────────────────────────
+async function checkML(){
+  const text=document.getElementById('mlInput').value.trim();
+  if(!text){showToast('Please enter some news text.','error');return;}
+  const btn=document.getElementById('mlBtn');
+  btn.disabled=true;btn.textContent='Checking…';
+  document.getElementById('mlResult').innerHTML=`<div class="res-label">ML VERDICT</div><div class="res-idle">…</div>`;
+  try{
+    const res=await fetch('/predict_ml',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const data=await res.json();
+    if(data.error){showToast(data.error,'error');return;}
+    const isFake=data.verdict==='FAKE';
+    document.getElementById('mlResult').innerHTML=`
+      <div class="res-label">ML VERDICT</div>
+      <div class="res-verdict ${isFake?'fake':'real'}">${isFake?'🔴 FAKE':'🟢 REAL'}</div>
+      <div class="res-probs">
+        <span style="color:var(--fake)">F ${data.fake_prob}%</span>
+        <span style="color:var(--real)">R ${data.real_prob}%</span>
+      </div>`;
+  }catch(e){showToast('Error: '+e.message,'error');}
+  finally{btn.disabled=false;btn.textContent='Check with Model →';}
+}
+
+// ── ② TV Sources check (live RSS only) ─────────────────────────────────────
+async function checkTV(){
+  const text=document.getElementById('tvInput').value.trim();
+  if(!text){showToast('Please enter some news text.','error');return;}
+  const btn=document.getElementById('tvBtn');
+  btn.disabled=true;btn.textContent='Searching TV feeds…';
+  document.getElementById('tvResult').innerHTML=`<div class="res-label">TV VERDICT</div><div class="res-idle">Checking ${7} sources…</div>`;
+  try{
+    const res=await fetch('/predict_tv',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const data=await res.json();
+    if(data.error){showToast(data.error,'error');return;}
+    const found=data.tv_matches && data.tv_matches.length>0;
+    if(found){
+      document.getElementById('tvResult').innerHTML=`
+        <div class="res-label">TV VERDICT</div>
+        <div class="res-verdict confirmed">✓ FOUND</div>
+        <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted);margin-bottom:4px;">${data.tv_matches.length} source${data.tv_matches.length>1?'s':''} matched</div>
+        <div class="tv-matches">
+          ${data.tv_matches.map(m=>`
+            <div class="tv-match-item">
+              <div class="tv-dot" style="background:${m.color}"></div>
+              <span class="tv-match-name">${m.source}</span>
+              ${m.link?`<a href="${m.link}" target="_blank" title="${esc(m.title)}" style="font-size:.6rem;color:var(--subtext)">↗</a>`:''}
+              <span class="tv-match-pct">${m.score}%</span>
+            </div>`).join('')}
+        </div>`;
+    } else {
+      document.getElementById('tvResult').innerHTML=`
+        <div class="res-label">TV VERDICT</div>
+        <div class="res-verdict notfound">✗ NOT FOUND</div>
+        <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted);text-align:center;margin-top:4px;">
+          No Lebanese TV channel reported this story.
+        </div>`;
+    }
+  }catch(e){showToast('Error: '+e.message,'error');}
+  finally{btn.disabled=false;btn.textContent='Check TV Sources →';}
+}
+
+// ── Keyboard shortcuts ─────────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='1'){e.preventDefault();checkML();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='2'){e.preventDefault();checkTV();}
+});
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function showToast(msg,type='success'){
+  const t=document.getElementById('toast');t.textContent=msg;t.className='show '+type;
+  setTimeout(()=>t.className='',3500);}
+function showLoader(msg){document.getElementById('loaderText').textContent=msg;document.getElementById('loader').classList.add('show');}
+function hideLoader(){document.getElementById('loader').classList.remove('show');}
+</script>
+</body>
+</html>
