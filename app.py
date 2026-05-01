@@ -12,7 +12,7 @@ app = Flask(__name__)
 DATASET_DIR   = os.path.join(os.path.dirname(__file__), "dataset")
 FAKE_CSV      = os.path.join(DATASET_DIR, "Fake.csv")
 TRUE_CSV      = os.path.join(DATASET_DIR, "True.csv")
-RSS_CACHE_TTL = 600   # refresh RSS every 10 minutes
+RSS_CACHE_TTL = 600
 
 # ── Lebanese / Arabic TV News Sources ─────────────────────────────────────────
 TV_SOURCES = [
@@ -105,10 +105,41 @@ def clean_text(text):
     text = re.sub(r'[^a-z ]', '', text)
     return text.strip()
 
+def download_dataset():
+    """Download dataset from Kaggle if not already present."""
+    if os.path.exists(FAKE_CSV) and os.path.exists(TRUE_CSV):
+        return True, "Dataset already exists"
+    try:
+        import kagglehub
+        from kagglehub import KaggleDatasetAdapter
+        os.makedirs(DATASET_DIR, exist_ok=True)
+        print("Downloading Fake.csv from Kaggle...")
+        fake_df = kagglehub.load_dataset(
+            KaggleDatasetAdapter.PANDAS,
+            "emineyetm/fake-news-detection-datasets",
+            "News _dataset/Fake.csv"
+        )
+        fake_df.to_csv(FAKE_CSV, index=False)
+        print("Downloading True.csv from Kaggle...")
+        true_df = kagglehub.load_dataset(
+            KaggleDatasetAdapter.PANDAS,
+            "emineyetm/fake-news-detection-datasets",
+            "News _dataset/True.csv"
+        )
+        true_df.to_csv(TRUE_CSV, index=False)
+        print("Dataset downloaded successfully!")
+        return True, "Downloaded successfully"
+    except Exception as e:
+        return False, f"Failed to download dataset: {str(e)}"
+
 def train():
     global model, tfidf, records
-    if not os.path.exists(FAKE_CSV) or not os.path.exists(TRUE_CSV):
-        return False, f"CSV files not found in {DATASET_DIR}"
+
+    # Download dataset from Kaggle if not present
+    ok, msg = download_dataset()
+    if not ok:
+        return False, msg
+
     fake_df = pd.read_csv(FAKE_CSV); fake_df["label"] = 1
     true_df = pd.read_csv(TRUE_CSV); true_df["label"] = 0
     df = pd.concat([fake_df, true_df], ignore_index=True).sample(frac=1, random_state=42)
@@ -167,7 +198,6 @@ def article_detail(article_id):
 
 @app.route("/predict_ml", methods=["POST"])
 def predict_ml():
-    """Check news against the trained ML model (CSV data) ONLY."""
     if model is None or tfidf is None:
         return jsonify({"error": "Model not trained yet. Click Train Model first."}), 400
     data = request.get_json()
@@ -186,7 +216,6 @@ def predict_ml():
 
 @app.route("/predict_tv", methods=["POST"])
 def predict_tv():
-    """Check news against live Lebanese TV RSS feeds ONLY."""
     data = request.get_json()
     text = data.get("text", "").strip()
     if not text:
