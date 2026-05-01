@@ -9,9 +9,6 @@ from sklearn.model_selection import train_test_split
 app = Flask(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DATASET_DIR   = os.path.join(os.path.dirname(__file__), "dataset")
-FAKE_CSV      = os.path.join(DATASET_DIR, "Fake.csv")
-TRUE_CSV      = os.path.join(DATASET_DIR, "True.csv")
 RSS_CACHE_TTL = 600
 
 # ── Lebanese / Arabic TV News Sources ─────────────────────────────────────────
@@ -105,43 +102,30 @@ def clean_text(text):
     text = re.sub(r'[^a-z ]', '', text)
     return text.strip()
 
-def download_dataset():
-    """Download dataset from Kaggle if not already present."""
-    if os.path.exists(FAKE_CSV) and os.path.exists(TRUE_CSV):
-        return True, "Dataset already exists"
+def train():
+    global model, tfidf, records
+
+    # Load directly from Kaggle without saving to disk
     try:
         import kagglehub
         from kagglehub import KaggleDatasetAdapter
-        os.makedirs(DATASET_DIR, exist_ok=True)
         print("Downloading Fake.csv from Kaggle...")
         fake_df = kagglehub.load_dataset(
             KaggleDatasetAdapter.PANDAS,
             "emineyetm/fake-news-detection-datasets",
             "News _dataset/Fake.csv"
         )
-        fake_df.to_csv(FAKE_CSV, index=False)
+        fake_df["label"] = 1
         print("Downloading True.csv from Kaggle...")
         true_df = kagglehub.load_dataset(
             KaggleDatasetAdapter.PANDAS,
             "emineyetm/fake-news-detection-datasets",
             "News _dataset/True.csv"
         )
-        true_df.to_csv(TRUE_CSV, index=False)
-        print("Dataset downloaded successfully!")
-        return True, "Downloaded successfully"
+        true_df["label"] = 0
     except Exception as e:
         return False, f"Failed to download dataset: {str(e)}"
 
-def train():
-    global model, tfidf, records
-
-    # Download dataset from Kaggle if not present
-    ok, msg = download_dataset()
-    if not ok:
-        return False, msg
-
-    fake_df = pd.read_csv(FAKE_CSV); fake_df["label"] = 1
-    true_df = pd.read_csv(TRUE_CSV); true_df["label"] = 0
     df = pd.concat([fake_df, true_df], ignore_index=True).sample(frac=1, random_state=42)
     df["text"] = (df.get("title", "") + " " + df.get("text", "")).apply(clean_text)
     df = df[df["text"].str.strip() != ""].reset_index(drop=True)
@@ -234,7 +218,6 @@ def sources():
 if __name__ == "__main__":
     print("\n" + "="*55)
     print("  Fake News Browser  +  TV Source Check")
-    print(f"  Dataset : {DATASET_DIR}")
     print(f"  Sources : {len(TV_SOURCES)} Lebanese TV channels")
     print("  Open    : http://localhost:5000")
     print("="*55 + "\n")
