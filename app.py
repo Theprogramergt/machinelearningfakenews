@@ -35,6 +35,18 @@ STOP_AR = {
     "لكن","غير","بشكل","نحو","نفس","ضمن","عبر","لأن","بما","أكثر",
 }
 
+# ── English stop words (expanded) ──────────────────────────────────────────
+STOP_EN = {
+    "the","a","an","and","or","but","in","on","at","to","for","of","by","with","is",
+    "are","am","be","been","being","have","has","had","do","does","did","will","would",
+    "should","could","may","might","can","must","shall","this","that","these","those",
+    "i","you","he","she","it","we","they","what","which","who","when","where","why",
+    "how","all","each","every","both","few","more","most","other","same","such","no",
+    "nor","not","only","own","so","than","too","very","as","from","up","about","into",
+    "through","during","before","after","above","below","between","out","off","over",
+    "under","again","further","then","once","was","if","him","her","us","just","my",
+}
+
 # ── RSS Cache ─────────────────────────────────────────────────────────────────
 _rss_cache = {}
 
@@ -81,13 +93,14 @@ def fetch_rss(source):
 
 
 # ── Smarter keyword extraction ────────────────────────────────────────────────
-def extract_keywords(text, min_len=3):
+def extract_keywords(text, min_len=2):
     """Extract Arabic + Latin words, remove stop words, deduplicate root-like stems."""
     words = re.findall(
         r'[\u0600-\u06FF]{' + str(min_len) + r',}|[a-zA-Z]{' + str(min_len) + r',}',
         text
     )
-    filtered = [w for w in words if w not in STOP_AR]
+    # Filter both Arabic and English stop words
+    filtered = [w.lower() for w in words if w.lower() not in STOP_AR and w.lower() not in STOP_EN]
     return filtered
 
 
@@ -110,12 +123,36 @@ def arabic_stem(word):
             break
     return w
 
+def english_stem(word):
+    """
+    Lightweight English stemmer: handles common suffixes (-ed, -ing, -ly, -ies, -s).
+    Returns the stem for better keyword matching.
+    """
+    w = word.lower()
+    if len(w) < 4:
+        return w
+    # Try to remove common suffixes
+    if w.endswith("ied"):
+        return w[:-3] + "y"
+    if w.endswith("ing"):
+        return w[:-3]
+    if w.endswith("ed"):
+        return w[:-2]
+    if w.endswith("ly"):
+        return w[:-2]
+    if w.endswith("ies"):
+        return w[:-3] + "y"
+    if w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
 
 def score_match(query_words, article_text):
     """
-    Dual scoring:
-      - exact overlap  (high weight)
-      - stemmed overlap (medium weight)
+        Multi-strategy scoring:
+            - Strategy 1: Direct substring matching
+            - Strategy 2: Exact keyword overlap (weight: 1.0)
+            - Strategy 3: Stemmed keywords (weight: 0.7)
+            - Strategy 4: Partial word matching (weight: 0.4)
     Returns 0.0–1.0
     """
     if not query_words or not article_text:
@@ -125,20 +162,40 @@ def score_match(query_words, article_text):
     if not art_words:
         return 0.0
 
-    q_set      = set(query_words)
-    a_set      = set(art_words)
+    article_text_lower = article_text.lower()
 
-    # exact
-    exact      = len(q_set & a_set)
+    # Strategy 1: Direct substring matching (for phrases)
+    query_phrase = " ".join(query_words).lower()
+    if len(query_phrase) > 5 and query_phrase in article_text_lower:
+        return 1.0
 
-    # stemmed
-    q_stems    = {arabic_stem(w) for w in q_set}
-    a_stems    = {arabic_stem(w) for w in a_set}
-    stemmed    = len(q_stems & a_stems)
+    q_set = set(query_words)
+    a_set = set(art_words)
 
-    # weighted score normalised to query length
-    raw = (exact * 1.0 + stemmed * 0.6) / max(len(q_set), 1)
-    return min(raw, 1.0)          # cap at 1.0
+    # Strategy 2: Exact keyword overlap (highest weight)
+    exact = len(q_set & a_set)
+
+    # Strategy 3: Stemmed Arabic keywords
+    q_ar_stems = {arabic_stem(w) for w in q_set if any(ord(c) >= 0x0600 for c in w)}
+    a_ar_stems = {arabic_stem(w) for w in a_set if any(ord(c) >= 0x0600 for c in w)}
+    ar_stemmed = len(q_ar_stems & a_ar_stems)
+
+    # Strategy 3b: Stemmed English keywords
+    q_en_stems = {english_stem(w) for w in q_set if all(ord(c) < 0x0600 for c in w)}
+    a_en_stems = {english_stem(w) for w in a_set if all(ord(c) < 0x0600 for c in w)}
+    en_stemmed = len(q_en_stems & a_en_stems)
+
+    # Strategy 4: Partial word matching (one word is substring of another)
+    partial = 0
+    for q in q_set:
+        for a in a_set:
+            if len(q) > 3 and len(a) > 3:
+                if q in a or a in q:
+                    partial += 0.5
+
+    # Weighted score normalized to query length
+    raw = (exact * 1.0 + ar_stemmed * 0.7 + en_stemmed * 0.7 + partial * 0.4) / max(len(q_set), 1)
+    return min(raw, 1.0)  # cap at 1.0
 
 
 def match_sources(user_text):
@@ -159,8 +216,8 @@ def match_sources(user_text):
             if s > best_score:
                 best_score, best_article = s, art
 
-        # ↓ lower threshold: 0.15 instead of 0.25
-        if best_score >= 0.15 and best_article:
+        # ↓ lower threshold: 0.08 for better matching
+        if best_score >= 0.08 and best_article:
             matches.append({
                 "source":    source["name"],
                 "source_ar": source["name_ar"],
